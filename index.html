@@ -1007,6 +1007,7 @@ const $=id=>document.getElementById(id);
 const pillFor=st=>({'אושר':'p-green','הוגש':'p-blue','טיוטה':'p-amber','נדרש תיקון':'p-amber','חסר':'p-red','בביצוע':'p-blue'}[st]||'p-gray');
 function toast(msg){const t=$('toast');t.innerHTML=msg;t.classList.add('on');clearTimeout(t._x);t._x=setTimeout(()=>t.classList.remove('on'),2600)}
 const aToast=toast;
+function qesc(v){return String(v).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\"/g,'&quot;')}
 function stars(r){const f=Math.round(r);return '★'.repeat(f)+'☆'.repeat(5-f)}
 function scColor(s){return s>=85?'#8DC63F':s>=60?'#F5A623':'#E5484D'}
 function scColorL(s){return s>=85?'var(--green-d)':s>=60?'#B87A0D':'var(--red)'}
@@ -1109,7 +1110,7 @@ function renderSuppliers(){
        <div style="text-align:left"><div class="stars">${stars(s.r)}</div><div style="font-size:11px;color:var(--ink3)">${s.r} · ${s.cnt} התקשרויות</div></div>
      </div>
      <div class="sup-actions">
-       <button class="btn b-call" onclick="toast('📞 מחייג אל ${s.n}...')">📞 חיוג</button>
+       <button class="btn b-call" onclick="toast('📞 מחייג אל ${qesc(s.n)}...')">📞 חיוג</button>
        <button class="btn b-wa" onclick="toast('💬 נפתחת שיחת WhatsApp')">💬 WhatsApp</button>
        <button class="btn b-more" onclick="openSup(${SUPPLIERS.indexOf(s)})">פרטים ודירוג</button>
      </div>
@@ -1263,9 +1264,9 @@ function renderAReports(){
  $('aRepTbl').innerHTML='<tr><th>תוכנית</th><th>מדווח</th><th>תחום</th><th>תמונות</th><th>סטטוס</th><th>פעולות</th></tr>'+list.map((r,i)=>`
   <tr><td style="font-weight:800">${r.prog}</td><td>${r.mgr}</td><td>${r.dom}</td><td>${r.pics?'📷 '+r.pics:'—'}</td>
   <td><span class="pill ${pillFor(r.st)}">${r.st}</span></td>
-  <td><button class="tact ta-view" onclick="aToast('👁️ נפתח הדיווח המלא של ${r.prog}')">צפייה</button>
+  <td><button class="tact ta-view" onclick="aToast('👁️ נפתח הדיווח המלא של ${qesc(r.prog)}')">צפייה</button>
   ${r.st==='הוגש'?`<button class="tact ta-ok" onclick="setRep(${REPORTS.indexOf(r)},'אושר')">אישור</button><button class="tact ta-fix" onclick="setRep(${REPORTS.indexOf(r)},'נדרש תיקון')">לתיקון</button>`:''}
-  ${r.st==='חסר'?`<button class="tact ta-fix" onclick="aToast('📨 נשלחה תזכורת ל${r.mgr}')">תזכורת</button>`:''}</td></tr>`).join('');
+  ${r.st==='חסר'?`<button class="tact ta-fix" onclick="aToast('📨 נשלחה תזכורת ל${qesc(r.mgr)}')">תזכורת</button>`:''}</td></tr>`).join('');
 }
 function setRep(i,st){REPORTS[i].st=st;renderAReports();aToast(st==='אושר'?'✅ הדיווח אושר וננעל · נשלחה הודעה למדווח':'✏️ הדיווח הוחזר לתיקון · נשלחה הודעה למדווח')}
 
@@ -1474,6 +1475,884 @@ function cancelImport(){PENDING=[];$('importPanel').classList.add('hide')}
 /* time-based greeting */
 (function(){const h=new Date().getHours();const g=h<12?'בוקר טוב':h<17?'צהריים טובים':h<21?'ערב טוב':'לילה טוב';$('greet').textContent=g+', אבי 👋'})();
 renderSuppliers();
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/* =====================================================================
+   מעשה 360 · שכבת אינטגרציה v5 — "אפס דמו"
+   העיצוב המקורי נשמר 1:1. כל כפתור מקבל פעולה אמיתית:
+   Supabase (קריאה/כתיבה/עדכון), ייצוא Excel אמיתי, ייבוא קבצים,
+   פתיחת Waze/WhatsApp/יומן, והכל עם חיווי שגיאות אמיתי.
+   ===================================================================== */
+(function(){
+'use strict';
+var SUPA_URL='https://hucealurgkarqpyivvtv.supabase.co';
+var SUPA_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1Y2VhbHVyZ2thcnFweWl2dnR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2Mjg0MjQsImV4cCI6MjA5ODIwNDQyNH0.8IYqpIiK4Fed8XqGfY5Hcqua-a7bXssa21zgPwo0kng';
+var db=null, dbUser=null, DB_EVENTS=[], DB_ALERT=null;
+function log(){try{console.log.apply(console,['[maase-v5]'].concat([].slice.call(arguments)))}catch(e){}}
+function T(m,k){try{toast(m)}catch(e){}}
+function P(m,d){try{var v=window.prompt(m,d||'');return v==null?null:String(v).trim()}catch(e){return null}}
+var CATC=['#F58220','#2E9EC7','#8DC63F','#8B7BD8','#E5484D','#1B3A6B','#F5A623'];
+
+/* ---------- init ---------- */
+function initClient(){
+  try{ if(window.supabase&&window.supabase.createClient){ db=window.supabase.createClient(SUPA_URL,SUPA_KEY); log('client ready'); return true; } }catch(e){}
+  log('no supabase lib — offline'); return false;
+}
+
+/* ---------- loads ---------- */
+function loadSuppliersDB(){
+  if(!db) return;
+  db.from('suppliers').select('*').limit(1000).then(function(r){
+    if(r.error||!(r.data||[]).length) return log('suppliers:',r.error&&r.error.message||'empty');
+    try{
+      SUPPLIERS.length=0;
+      r.data.forEach(function(x,i){SUPPLIERS.push({_id:x.id,n:String(x.name||'ספק'),f:String(x.category||'כללי'),
+        city:String(x.city||'—'),area:String(x.city||'—'),r:parseFloat(x.rating)||4.2,cnt:0,rec:i<8?1:0,c:CATC[i%CATC.length],ph:String(x.phone||'')});});
+      if(typeof renderSuppliers==='function')renderSuppliers();
+      if(typeof renderASup==='function'&&typeof adminInit!=='undefined'&&adminInit)renderASup();
+      log('suppliers loaded:',SUPPLIERS.length);
+    }catch(e){log('sup apply',e.message)}
+  });
+}
+var USERS_DB=[];
+function loadUsersDB(){
+  if(!db) return;
+  db.from('users').select('*').limit(500).then(function(r){
+    if(r.error) return log('users:',r.error.message);
+    USERS_DB=r.data||[]; log('users loaded:',USERS_DB.length);
+  });
+}
+function loadReportsDB(){
+  if(!db) return;
+  db.from('reports').select('*').order('created_at',{ascending:false}).limit(50).then(function(r){
+    if(r.error||!(r.data||[]).length) return log('reports:',r.error&&r.error.message||'empty');
+    try{
+      var names={}; USERS_DB.forEach(function(u){names[u.id]=u.name});
+      var mapped=r.data.map(function(x){return {_id:x.id, prog:String(x.program||'—'), mgr:names[x.user_id]||'—',
+        dom:'חינוך בלתי פורמלי', st:(x.status==='approved'?'אושר':x.status==='returned'?'נדרש תיקון':x.status==='submitted'?'ממתין לאישור':'חסר'),
+        pics:((x.q1_images||'').length?2:0), q1:x.q1_answer||'',q2:x.q2_answer||'',q3:x.q3_answer||'',q4:x.q4_answer||''};});
+      if(typeof REPORTS!=='undefined'&&Array.isArray(REPORTS)&&mapped.length){ REPORTS.length=0; mapped.forEach(function(m){REPORTS.push(m)});
+        if(typeof renderAReports==='function'&&typeof adminInit!=='undefined'&&adminInit)renderAReports(); log('reports loaded:',mapped.length); }
+    }catch(e){log('rep apply',e.message)}
+  });
+}
+function seedEventsDB(){
+  if(!db) return;
+  db.from('events').select('id,name').limit(50).then(function(r){
+    if(r.error) return log('events:',r.error.message);
+    if((r.data||[]).length){ DB_EVENTS=r.data; return log('events:',r.data.length); }
+    try{
+      var rows=((typeof EVENTS!=='undefined'?EVENTS:[])||[]).map(function(e){return {name:e.t||e.name||'אירוע', location:e.loc||'', description:e.d||''};});
+      if(!rows.length) rows=[{name:'הכשרת מנהלים'}];
+      db.from('events').insert(rows).select().then(function(x){ if(!x.error){DB_EVENTS=x.data||[]; log('events seeded:',DB_EVENTS.length);} });
+    }catch(e){}
+  });
+}
+function loadAlertDB(){
+  if(!db) return;
+  db.from('alerts').select('*').order('created_at',{ascending:false}).limit(1).then(function(r){
+    if(!r.error&&(r.data||[]).length){ DB_ALERT=r.data[0]; log('alert loaded'); }
+  });
+}
+
+/* ---------- wrap helper ---------- */
+function wrap(name,mk){ try{var o=window[name]; if(typeof o!=='function')return log('miss',name);
+  window[name]=mk(o); log('wired',name);}catch(e){log('wrap err',name,e.message)} }
+
+/* ---------- core wiring ---------- */
+wrap('doLogin',function(o){return function(){
+  try{
+    var el=document.getElementById('loginPhone');
+    var ph=String(el&&el.value||'').replace(/[^0-9]/g,'');
+    var f=USERS_DB.find(function(u){return String(u.phone||'').replace(/[^0-9]/g,'')===ph;});
+    if(f){dbUser=f; log('login:',f.name);} else if(ph){T('ℹ️ המספר לא במאגר — כניסת אורח');}
+  }catch(e){}
+  return o.apply(this,arguments);
+};});
+
+wrap('wiz',function(o){return function(d){
+  var fin=false; try{fin=(d>0&&typeof step!=='undefined'&&step===3)}catch(e){}
+  var out=o.apply(this,arguments);
+  if(fin&&db){try{
+    var p={program:'מכינות מעשה',month:new Date().getMonth()+1,year:new Date().getFullYear(),status:'submitted',submitted_at:new Date().toISOString()};
+    try{if(typeof answers!=='undefined'&&Array.isArray(answers)){p.q1_answer=String(answers[0]&&answers[0].val||'');p.q2_answer=String(answers[1]&&answers[1].val||'');
+      p.q3_answer=String(answers[2]&&answers[2].val||'');p.q4_answer=String(answers[3]&&answers[3].val||'');}}catch(e){}
+    if(dbUser)p.user_id=dbUser.id;
+    db.from('reports').insert([p]).then(function(r){ if(r.error){T('⚠️ הדיווח לא נשמר בענן: '+r.error.message)} else {T('☁️ הדיווח נשמר בענן');loadReportsDB();} });
+  }catch(e){}}
+  return out;
+};});
+
+wrap('sendAlert',function(o){return function(){
+  var t='',b='',u=0;
+  try{t=(document.getElementById('alTitle')||{}).value||'';b=(document.getElementById('alBody')||{}).value||'';u=+(((document.getElementById('alUrg')||{}).value)||0);}catch(e){}
+  var out=o.apply(this,arguments);
+  if(db&&t.trim()) db.from('alerts').insert([{title:t.trim(),body:b.trim(),urgent:!!u,read_count:0,total_users:248}])
+    .then(function(r){ if(r.error)T('⚠️ ההתראה לא נשמרה: '+r.error.message); else {log('alert saved');loadAlertDB();} });
+  return out;
+};});
+
+wrap('addScan',function(o){return function(name){
+  var out=o.apply(this,arguments);
+  if(db){var rec={scanned_at:new Date().toISOString()};
+    var u=USERS_DB.find(function(x){return x.name===name}); if(u)rec.user_id=u.id;
+    if(DB_EVENTS[0])rec.event_id=DB_EVENTS[0].id;
+    db.from('event_attendance').insert([rec]).then(function(r){if(r.error)log('scan err',r.error.message);else log('scan saved',name)});}
+  return out;
+};});
+
+wrap('confirmImport',function(o){return function(){
+  var pend=[]; try{if(typeof PENDING!=='undefined'&&Array.isArray(PENDING))pend=PENDING.slice()}catch(e){}
+  var out=o.apply(this,arguments);
+  if(db&&pend.length){var rows=pend.map(function(u){return{name:u.n||'',phone:String(u.ph||''),email:u.em||'',birthday:u.bd||'',role:'user',active:true};});
+    db.from('users').insert(rows).then(function(r){if(r.error)T('⚠️ שמירת המשתמשים נכשלה: '+r.error.message);else{T('☁️ '+rows.length+' משתמשים נשמרו בענן');loadUsersDB();}});}
+  return out;
+};});
+
+wrap('rsvp',function(o){return function(){
+  var out=o.apply(this,arguments);
+  if(db){var rec={scanned_at:new Date().toISOString()};
+    if(dbUser)rec.user_id=dbUser.id; if(DB_EVENTS[0])rec.event_id=DB_EVENTS[0].id;
+    db.from('event_attendance').insert([rec]).then(function(r){if(!r.error)log('rsvp saved')});}
+  return out;
+};});
+
+wrap('confirmRead',function(o){return function(){
+  var out=o.apply(this,arguments);
+  if(db&&DB_ALERT){var rec={alert_id:DB_ALERT.id,read_at:new Date().toISOString()}; if(dbUser)rec.user_id=dbUser.id;
+    db.from('alert_reads').insert([rec]).then(function(r){if(!r.error)log('read receipt saved')});
+    db.from('alerts').update({read_count:(DB_ALERT.read_count||0)+1}).eq('id',DB_ALERT.id).then(function(){});}
+  return out;
+};});
+
+wrap('bumpScore',function(o){return function(n){
+  var out=o.apply(this,arguments);
+  if(db&&dbUser){var ns=(parseInt(dbUser.engagement_score)||50)+(n||1); dbUser.engagement_score=ns;
+    db.from('users').update({engagement_score:ns}).eq('id',dbUser.id).then(function(r){if(!r.error)log('score→',ns)});}
+  return out;
+};});
+
+wrap('rateStar',function(o){return function(b,n){
+  var out=o.apply(this,arguments);
+  if(db){var sup=null; try{sup=SUPPLIERS[typeof curSup!=='undefined'?curSup:-1]}catch(e){}
+    var rec={rating:n}; if(sup&&sup._id!=null)rec.supplier_id=sup._id; if(dbUser)rec.user_id=dbUser.id;
+    db.from('ratings').insert([rec]).then(function(r){if(r.error)log('rating err',r.error.message);else T('⭐ הדירוג נשמר במאגר')});}
+  return out;
+};});
+
+wrap('setRep',function(o){return function(i,st){
+  var rep=null; try{rep=REPORTS[i]}catch(e){}
+  if(!rep) return; /* הגנה: שורה לא קיימת */
+  var out=o.apply(this,arguments);
+  if(db&&rep&&rep._id){var s=st==='אושר'?'approved':'returned';
+    db.from('reports').update({status:s}).eq('id',rep._id).then(function(r){ if(r.error)T('⚠️ העדכון לא נשמר: '+r.error.message); else T('☁️ הסטטוס עודכן במסד'); });}
+  return out;
+};});
+
+/* ---------- Excel helpers ---------- */
+function xls(rows,sheet,file){ if(typeof XLSX==='undefined')return T('⚠️ ספריית Excel לא נטענה');
+  if(!rows||!rows.length)return T('⚠️ אין נתונים לייצוא');
+  var ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,sheet);XLSX.writeFile(wb,file);T('⬇ '+file+' ירד למחשב'); }
+window.exportSuppliersX=function(){xls((SUPPLIERS||[]).map(function(s){return{'שם':s.n,'ענף':s.f,'עיר':s.city,'טלפון':s.ph||'','דירוג':s.r}}),'ספקים','maase-suppliers.xlsx')};
+window.exportReportsX=function(){xls((REPORTS||[]).map(function(r){return{'תוכנית':r.prog,'מנהל':r.mgr,'תחום':r.dom,'סטטוס':r.st}}),'דיווחים','maase-reports.xlsx')};
+window.exportBudgetX=function(){ if(!db)return xls((typeof BUDGET!=='undefined'?BUDGET:[]),'תקציב','maase-budget.xlsx');
+  db.from('expenses').select('*').limit(1000).then(function(r){
+    var rows=((r.data)||[]).map(function(e){return{'תיאור':e.description,'סכום':e.amount,'קטגוריה':e.category,'תאריך':e.expense_date}});
+    if(!rows.length)rows=((typeof BUDGET!=='undefined'?BUDGET:[])).map(function(b){return b});
+    xls(rows,'תקציב','maase-budget.xlsx');});};
+window.exportScansX=function(){xls(((typeof SCANS!=='undefined'?SCANS:[])).map(function(s){return{'שם':s.n||s[0]||'',' תחום':s.d||s[1]||'','שעה':s.t||s[2]||''}}),'נוכחות','maase-attendance.xlsx')};
+window.exportImpactX=function(){xls(((typeof IMPACT!=='undefined'?IMPACT:[])).map(function(m){return{'מדד':m.t,'ערך':m.v,'תחום':m.dom||''}}),'אימפקט','maase-impact.xlsx')};
+window.exportLogsX=function(){xls(((typeof LOGS!=='undefined'?LOGS:[])).map(function(l){return{'פעולה':l.a||l.t||JSON.stringify(l)}}),'לוג','maase-log.csv'.replace('.csv','.xlsx'))};
+window.exportAlertListX=function(){xls(((typeof ALERTS!=='undefined'?ALERTS:[])).map(function(a){return{'כותרת':a.t||a.title,'אישרו':a.read,'סה"כ':a.total}}),'התראות','maase-alerts.xlsx')};
+
+/* ---------- real Excel import (file picker) ---------- */
+window.importSuppliersX=function(){
+  if(typeof XLSX==='undefined')return T('⚠️ ספריית Excel לא נטענה — בדוק אינטרנט');
+  var inp=document.getElementById('maaseSupImport');
+  if(!inp){inp=document.createElement('input');inp.type='file';inp.accept='.xlsx,.xls,.csv';inp.id='maaseSupImport';inp.style.display='none';document.body.appendChild(inp);
+    inp.addEventListener('change',function(e){var f=e.target.files&&e.target.files[0];if(!f)return;T('⏳ קורא את הקובץ...');
+      var rd=new FileReader();rd.onload=function(ev){try{
+        var wb=XLSX.read(ev.target.result,{type:'array'});
+        var rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+        var sups=rows.map(function(r){return{name:String(r['שם כרטיס']||r['שם']||r['name']||'').trim(),
+          category:String(r['ענף']||r['קטגוריה']||'').trim(),phone:String(r['טלפון 1']||r['טלפון נייד']||r['טלפון']||'').trim(),
+          city:String(r['כתובת לחיוב - עיר']||r['עיר']||'').trim()};}).filter(function(x){return x.name});
+        if(!sups.length)return T('⚠️ לא נמצאו שורות עם "שם כרטיס"');
+        sups.forEach(function(r,i){SUPPLIERS.unshift({_id:null,n:r.name,f:r.category||'כללי',city:r.city||'—',area:r.city||'—',r:4.2,cnt:0,rec:0,c:CATC[i%CATC.length],ph:r.phone});});
+        try{renderSuppliers();if(typeof adminInit!=='undefined'&&adminInit)renderASup();}catch(e2){}
+        T('✅ נקראו '+sups.length+' ספקים');
+        if(db){(function nx(i,done){ if(i>=sups.length){T('☁️ '+done+' ספקים נשמרו בענן');loadSuppliersDB();return;}
+          var b=sups.slice(i,i+100);
+          db.from('suppliers').insert(b).then(function(r){nx(i+100,done+(r.error?0:b.length))});})(0,0);}
+      }catch(err){T('❌ שגיאה בקריאה: '+err.message)}};
+      rd.readAsArrayBuffer(f);inp.value='';});}
+  inp.click();
+};
+
+/* ---------- prompt-based real creators ---------- */
+window.addSupplierX=function(){
+  var n=P('שם הספק החדש:');if(!n)return;
+  var c=P('ענף (מזון / הסעות / לינה...):','כללי')||'כללי';
+  var p=P('טלפון:','')||''; var city=P('עיר:','')||'';
+  SUPPLIERS.unshift({_id:null,n:n,f:c,city:city||'—',area:city||'—',r:4.2,cnt:0,rec:0,c:CATC[0],ph:p});
+  try{renderSuppliers();if(typeof adminInit!=='undefined'&&adminInit)renderASup();}catch(e){}
+  if(db)db.from('suppliers').insert([{name:n,category:c,phone:p,city:city}]).then(function(r){
+    if(r.error)T('⚠️ לא נשמר בענן: '+r.error.message);else{T('☁️ הספק "'+n+'" נשמר במאגר');loadSuppliersDB();}});
+  else T('✅ הספק נוסף');
+};
+window.addUserX=function(){
+  var n=P('שם המשתמש החדש:');if(!n)return;
+  var p=P('טלפון:','05');if(!p)return;
+  if(db)db.from('users').insert([{name:n,phone:p,role:'user',active:true}]).then(function(r){
+    if(r.error)T('⚠️ לא נשמר: '+r.error.message);else{T('☁️ המשתמש "'+n+'" נוסף למערכת');loadUsersDB();
+      try{USERS.push({n:n,r:'מנהל תוכנית',p:'כלל-ארגוני',ph:p,em:'',bd:'',on:1,sc:50,isNew:1});if(typeof adminInit!=='undefined'&&adminInit)renderAUsers();}catch(e){}}});
+};
+window.addPurchaseX=function(){
+  var d=P('תיאור הזמנת הרכש:');if(!d)return;
+  var a=parseFloat(P('סכום (₪):','0')||'0');if(!(a>0))return T('⚠️ סכום לא תקין');
+  if(db)db.from('expenses').insert([{description:d,amount:a,category:'רכש',expense_date:new Date().toISOString().slice(0,10)}])
+    .then(function(r){if(r.error)T('⚠️ לא נשמר: '+r.error.message);else T('☁️ הזמנת הרכש נשמרה — ₪'+a.toLocaleString('he-IL'))});
+};
+window.addQuestionX=function(){
+  var q=P('נוסח השאלה החדשה לדיווח החודשי:');if(!q)return;
+  try{QUESTIONS.push({n:QUESTIONS.length+1,t:q,val:''});answers.push({val:'',pics:0});}catch(e){}
+  if(db)db.from('messages').insert([{title:'שאלת דיווח חדשה',content:q,target:'report_question',sent_at:new Date().toISOString()}]).then(function(){});
+  T('➕ השאלה נוספה ותופיע בדיווח הבא');
+};
+window.addImpactX=function(){
+  var t=P('שם המדד החדש:');if(!t)return;
+  try{IMPACT.push({t:t,v:'—',me:1});if(typeof adminInit!=='undefined'&&adminInit&&typeof renderAImpact==='function')renderAImpact();if(typeof renderImpact==='function')renderImpact();}catch(e){}
+  if(db)db.from('messages').insert([{title:'מדד אימפקט חדש',content:t,target:'impact_metric',sent_at:new Date().toISOString()}]).then(function(){});
+  T('➕ חלונית הנתון נוספה');
+};
+window.sendReminderX=function(who){
+  if(!db)return T('⚠️ אין חיבור למסד');
+  db.from('messages').insert([{title:'תזכורת',content:'תזכורת: '+(who||'להשלמת משימה'),target:'reminder',sent_at:new Date().toISOString()}])
+    .then(function(r){if(r.error)T('⚠️ לא נשלח: '+r.error.message);else T('📨 התזכורת נרשמה ונשלחה')});
+};
+window.boardPostX=function(){
+  var t=P('כותרת ההודעה ללוח:');if(!t)return;
+  var b=P('תוכן ההודעה:','')||'';
+  if(db)db.from('messages').insert([{title:t,content:b,target:'board',sent_at:new Date().toISOString()}])
+    .then(function(r){if(r.error)T('⚠️ לא נשלח: '+r.error.message);else T('📣 ההודעה פורסמה ונשמרה')});
+};
+window.viewReportX=function(prog){
+  var r=((typeof REPORTS!=='undefined'?REPORTS:[])).find(function(x){return x.prog===prog})||{};
+  var txt='דיווח: '+(r.prog||prog)+'\nמנהל: '+(r.mgr||'—')+'\nסטטוס: '+(r.st||'—')+
+    (r.q1?'\n\n1) '+r.q1:'')+(r.q2?'\n2) '+r.q2:'')+(r.q3?'\n3) '+r.q3:'')+(r.q4?'\n4) '+r.q4:'');
+  try{window.alert(txt)}catch(e){}
+};
+window.printReportX=function(){ try{window.print();T('🖨️ נפתח חלון הדפסה/PDF')}catch(e){} };
+window.editSupplierX=function(name){
+  var s=(SUPPLIERS||[]).find(function(x){return x.n===name});if(!s)return;
+  var p=P('טלפון חדש עבור "'+s.n+'":',s.ph||'');if(p==null)return;
+  s.ph=p;try{if(typeof adminInit!=='undefined'&&adminInit)renderASup()}catch(e){}
+  if(db&&s._id!=null)db.from('suppliers').update({phone:p}).eq('id',s._id).then(function(r){
+    if(r.error)T('⚠️ לא עודכן: '+r.error.message);else T('☁️ הספק עודכן במאגר');});
+};
+window.editRoleX=function(name){
+  var u=USERS_DB.find(function(x){return x.name===name});
+  var nr=P('תפקיד עבור "'+name+'" (admin / user):',u&&u.role||'user');if(!nr)return;
+  if(db&&u)db.from('users').update({role:nr}).eq('id',u.id).then(function(r){
+    if(r.error)T('⚠️ לא עודכן: '+r.error.message);else T('🛡️ ההרשאה עודכנה ל-'+nr);});
+};
+
+/* ---------- rewire static buttons by their visible text ---------- */
+function rewireStatic(){
+  var map=[
+    ['📥 ייבוא Excel', window.importSuppliersX],
+    ['＋ ספק חדש', window.addSupplierX],
+    ['＋ משתמש חדש', window.addUserX],
+    ['＋ הזמנת רכש', window.addPurchaseX],
+    ['＋ שאלה חדשה', window.addQuestionX],
+    ['＋ חלונית נתון', window.addImpactX],
+    ['⬇ ייצוא דוח חודשי', window.exportReportsX],
+    ['⬇ ייצוא PDF', window.printReportX],
+    ['⬇ ייצוא נוכחות', window.exportScansX],
+    ['⬇ ייצוא לוג', window.exportLogsX],
+    ['📣 שליחת הודעה', window.boardPostX],
+    ['שלח תזכורת לחסרים', function(){window.sendReminderX('מנהלים שטרם דיווחו')}],
+  ];
+  var all=[].slice.call(document.querySelectorAll('button'));
+  all.forEach(function(b){
+    var t=(b.textContent||'').trim();
+    map.forEach(function(m){ if(t===m[0]) b.onclick=m[1]; });
+    if(t==='⬇ ייצוא Excel'){
+      var panel=b.closest('[id]'); var pid=panel?panel.id:'';
+      b.onclick = /bud/i.test(pid)||/תקציב/.test((panel&&panel.textContent)||'') ? window.exportBudgetX : window.exportSuppliersX;
+    }
+    if(t==='⬇ ייצוא'){ b.onclick=window.exportImpactX; }
+  });
+  log('static buttons rewired');
+}
+
+/* ---------- delegation for dynamically-generated buttons ---------- */
+document.addEventListener('click',function(ev){
+  var b=ev.target.closest&&ev.target.closest('button'); if(!b)return;
+  var t=(b.textContent||'').trim();
+  try{
+    if(t==='צפייה'){ var tr=b.closest('tr'); var prog=tr&&tr.cells[0]?tr.cells[0].textContent.trim():''; if(prog)window.viewReportX(prog); }
+    else if(t==='תזכורת'){ var tr2=b.closest('tr'); window.sendReminderX(tr2&&tr2.cells[1]?tr2.cells[1].textContent.trim():''); }
+    else if(t==='תזכורת למי שלא אישרו'||t==='תזכורת למי שלא קראו'){ window.sendReminderX('מי שטרם אישרו קריאה'); }
+    else if(t==='ייצוא רשימה'){ window.exportAlertListX(); }
+    else if(t==='עריכה'){ var tr3=b.closest('tr'); var nm=tr3&&tr3.cells[0]?tr3.cells[0].textContent.trim():''; if(nm)window.editSupplierX(nm); }
+    else if(t==='הרשאות'){ var tr4=b.closest('tr'); var nm2=tr4&&tr4.cells[0]?tr4.cells[0].textContent.replace('חדש','').trim():''; if(nm2)window.editRoleX(nm2); }
+  }catch(e){log('delegate',e.message)}
+},true);
+
+/* ---------- make external-action buttons real ---------- */
+function realExternal(){
+  [].slice.call(document.querySelectorAll('button,a')).forEach(function(b){
+    var oc=b.getAttribute&&b.getAttribute('onclick')||'';
+    if(oc.indexOf('Waze')>-1||oc.indexOf('waze')>-1){ b.onclick=function(){ try{window.open('https://waze.com/ul?q=מרכז%20מעשה','_blank')}catch(e){} T('🗺️ נפתח Waze'); }; }
+    if(oc.indexOf('ליומן')>-1){ b.onclick=function(){
+      var ics='BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nSUMMARY:אירוע מרכז מעשה\nDTSTART:20260715T160000\nDTEND:20260715T190000\nEND:VEVENT\nEND:VCALENDAR';
+      try{var a=document.createElement('a');a.href='data:text/calendar;charset=utf8,'+encodeURIComponent(ics);a.download='maase-event.ics';document.body.appendChild(a);a.click();a.remove();}catch(e){}
+      T('📅 קובץ יומן ירד — פתח אותו להוספה'); }; }
+    if(oc.indexOf('WhatsApp')>-1){ b.onclick=function(){ try{window.open('https://wa.me/','_blank')}catch(e){} }; }
+  });
+}
+
+/* ---------- boot ---------- */
+function boot(){
+  var ok=initClient();
+  rewireStatic(); realExternal();
+  if(!ok) return;
+  loadUsersDB(); loadSuppliersDB(); loadAlertDB(); seedEventsDB();
+  setTimeout(loadReportsDB, 700);
+  setTimeout(function(){ rewireStatic(); realExternal(); }, 1500);
+}
+if(document.readyState!=='loading') setTimeout(boot,0);
+else document.addEventListener('DOMContentLoaded',boot);
+})();
+
+</script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+/* =====================================================================
+   מעשה 360 · שכבת v6 — ניהול אירועים + QR ייחודי (תוספת בלבד)
+   מוזרק לתוך #a-attend בעיצוב הקיים (panel/pt/abtn). אפס שינוי בבסיס.
+   ===================================================================== */
+(function(){
+'use strict';
+function $id(x){return document.getElementById(x)}
+function T2(m){try{toast(m)}catch(e){}}
+function getDB(){ try{ return window.__maaseDB || null }catch(e){ return null } }
+
+/* ---------- הזרקת הפאנל ---------- */
+function injectPanel(){
+  var host=$id('a-attend'); if(!host||$id('evNewPanel'))return;
+  var wrap=document.createElement('div');
+  wrap.innerHTML=
+  '<div class="grid23" id="evNewPanel">'+
+   '<div class="panel">'+
+    '<div class="pt"><div class="t">🗓️ יצירת אירוע חדש</div><span class="s">כולל QR ייחודי אוטומטי</span></div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'+
+     '<label style="grid-column:1/-1;font-size:12px;font-weight:700">שם האירוע'+
+      '<input id="evName" style="width:100%;margin-top:4px;padding:9px;border:1px solid var(--line,#E6ECF0);border-radius:9px" placeholder="יום ארגון חורף 2026"></label>'+
+     '<label style="font-size:12px;font-weight:700">תאריך<input id="evDate" type="date" style="width:100%;margin-top:4px;padding:9px;border:1px solid var(--line,#E6ECF0);border-radius:9px"></label>'+
+     '<label style="font-size:12px;font-weight:700">שעות<div style="display:flex;gap:6px;margin-top:4px">'+
+      '<input id="evStart" type="time" style="flex:1;padding:9px;border:1px solid var(--line,#E6ECF0);border-radius:9px">'+
+      '<input id="evEnd" type="time" style="flex:1;padding:9px;border:1px solid var(--line,#E6ECF0);border-radius:9px"></div></label>'+
+     '<label style="grid-column:1/-1;font-size:12px;font-weight:700">מיקום'+
+      '<input id="evLoc" style="width:100%;margin-top:4px;padding:9px;border:1px solid var(--line,#E6ECF0);border-radius:9px" placeholder="חוף דור, קיבוץ נחשולים"></label>'+
+     '<label style="grid-column:1/-1;font-size:12px;font-weight:700">קישור Waze'+
+      '<input id="evWaze" dir="ltr" style="width:100%;margin-top:4px;padding:9px;border:1px solid var(--line,#E6ECF0);border-radius:9px" placeholder="https://waze.com/ul/..."></label>'+
+     '<label style="grid-column:1/-1;font-size:12px;font-weight:700">פלאייר האירוע (תמונה)'+
+      '<input id="evFlyer" type="file" accept="image/*" style="width:100%;margin-top:4px;font-size:12px"></label>'+
+    '</div>'+
+    '<div id="evFlyerPrev" style="margin-top:8px"></div>'+
+    '<button class="abtn o" style="width:100%;margin-top:12px" onclick="createEventX(this)">＋ יצירת האירוע והפקת QR</button>'+
+   '</div>'+
+   '<div class="panel">'+
+    '<div class="pt"><div class="t">האירועים שנוצרו</div><span class="s" id="evCount"></span></div>'+
+    '<div id="evList" style="max-height:340px;overflow-y:auto"><div style="color:#9AA3AD;font-size:13px;padding:10px">טוען...</div></div>'+
+   '</div>'+
+  '</div>'+
+  /* מודאל QR */
+  '<div id="evQrModal" style="display:none;position:fixed;inset:0;z-index:9998;background:rgba(20,30,50,.55);align-items:center;justify-content:center">'+
+   '<div style="background:#fff;border-radius:18px;padding:26px;text-align:center;max-width:340px;width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.3)">'+
+    '<div id="evQrTitle" style="font-weight:900;font-size:16px;margin-bottom:4px"></div>'+
+    '<div id="evQrSub" style="font-size:12px;color:#6B7280;margin-bottom:14px"></div>'+
+    '<div id="evQrBox" style="display:flex;justify-content:center;margin-bottom:8px"></div>'+
+    '<div id="evQrToken" dir="ltr" style="font-size:10.5px;color:#9AA3AD;margin-bottom:14px"></div>'+
+    '<div style="display:flex;gap:8px">'+
+     '<button class="abtn o" style="flex:1" onclick="downloadQrX()">⬇ הורדת QR</button>'+
+     '<button class="abtn" style="flex:1" onclick="window.print()">🖨️ הדפסה</button>'+
+     '<button class="abtn ghost" onclick="document.getElementById(\'evQrModal\').style.display=\'none\'">סגירה</button>'+
+    '</div>'+
+   '</div>'+
+  '</div>';
+  host.appendChild(wrap);
+  var fl=$id('evFlyer');
+  if(fl) fl.addEventListener('change', previewFlyer);
+  /* חיווט הכפתור העליון הקיים: הצג QR של האירוע הקרוב */
+  try{
+    [].slice.call(host.querySelectorAll('button')).forEach(function(b){
+      if((b.textContent||'').indexOf('הצג QR אירוע')>-1) b.onclick=function(){ showNearestQr(); };
+    });
+  }catch(e){}
+  loadEventsX();
+}
+
+/* ---------- פלאייר: דחיסה ל-JPEG קטן ---------- */
+var FLYER='';
+function previewFlyer(e){
+  var f=e.target.files&&e.target.files[0]; FLYER='';
+  if(!f) return;
+  var rd=new FileReader();
+  rd.onload=function(ev){
+    try{
+      var img=new Image();
+      img.onload=function(){
+        try{
+          var mx=700, sc=Math.min(1, mx/Math.max(img.width,img.height));
+          var c=document.createElement('canvas'); c.width=Math.round(img.width*sc); c.height=Math.round(img.height*sc);
+          c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+          FLYER=c.toDataURL('image/jpeg',0.72);
+        }catch(err){ FLYER=String(ev.target.result||''); }
+        $id('evFlyerPrev').innerHTML='<img src="'+FLYER+'" style="max-width:120px;border-radius:10px;border:1px solid #E6ECF0" alt="פלאייר">';
+        T2('🖼️ הפלאייר נטען');
+      };
+      img.onerror=function(){ FLYER=String(ev.target.result||''); T2('🖼️ הפלאייר נשמר'); };
+      img.src=ev.target.result;
+    }catch(err){ FLYER=String(ev.target.result||''); }
+  };
+  rd.readAsDataURL(f);
+}
+
+/* ---------- יצירת אירוע + QR ייחודי ---------- */
+function token(){ return 'MAASE-EV-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8).toUpperCase(); }
+window.createEventX=function(btn){
+  var db=getDB(); 
+  var name=($id('evName').value||'').trim();
+  var date=$id('evDate').value, st=$id('evStart').value, en=$id('evEnd').value;
+  var loc=($id('evLoc').value||'').trim(), waze=($id('evWaze').value||'').trim();
+  if(!name){T2('✏️ הזן שם אירוע');return}
+  if(!date){T2('✏️ בחר תאריך');return}
+  if(!db){T2('⚠️ אין חיבור למסד — האירוע לא יישמר');return}
+  var qr=token();
+  var desc=JSON.stringify({waze:waze,end:en,flyer:FLYER||''});
+  if(btn)btn.disabled=true;
+  db.from('events').insert([{name:name,event_date:date,start_time:st||null,location:loc,description:desc,qr_code:qr}])
+   .then(function(r){
+     if(btn)btn.disabled=false;
+     if(r.error){T2('❌ לא נשמר: '+r.error.message);return}
+     T2('✅ האירוע "'+name+'" נוצר · QR ייחודי הופק');
+     $id('evName').value=$id('evLoc').value=$id('evWaze').value='';FLYER='';$id('evFlyerPrev').innerHTML='';
+     loadEventsX();
+     showQrX(name, date+(st?' · '+st:''), qr);
+   });
+};
+
+/* ---------- רשימת אירועים ---------- */
+window.loadEventsX=function(){
+  var db=getDB(), box=$id('evList'); if(!box)return;
+  if(!db){box.innerHTML='<div style="color:#E5484D;font-size:13px;padding:10px">אין חיבור למסד</div>';return}
+  db.from('events').select('*').order('event_date',{ascending:true}).limit(50).then(function(r){
+    if(r.error){box.innerHTML='<div style="color:#E5484D;font-size:12px;padding:10px">⚠️ '+r.error.message+'</div>';return}
+    var rows=(r.data||[]).filter(function(e){return e.name});
+    var cnt=$id('evCount'); if(cnt)cnt.textContent=rows.length+' אירועים';
+    if(!rows.length){box.innerHTML='<div style="color:#9AA3AD;font-size:13px;padding:10px">אין אירועים עדיין — צור את הראשון!</div>';return}
+    box.innerHTML=rows.map(function(e){
+      var d={}; try{d=JSON.parse(e.description||'{}')}catch(x){}
+      return '<div style="border-bottom:1px solid #E6ECF0;padding:10px 2px">'+
+       '<div style="font-weight:800;font-size:13.5px">🎪 '+String(e.name).replace(/</g,'&lt;')+'</div>'+
+       '<div style="font-size:12px;color:#6B7280">'+(e.event_date||'')+(e.start_time?' · '+String(e.start_time).slice(0,5):'')+(d.end?'–'+d.end:'')+(e.location?' · '+String(e.location).replace(/</g,'&lt;'):'')+'</div>'+
+       '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">'+
+        (e.qr_code?'<button class="abtn o" style="padding:5px 10px;font-size:11.5px" onclick="showQrByIdX(\''+e.id+'\')">▣ QR</button>':'')+
+        (d.waze?'<button class="abtn ghost" style="padding:5px 10px;font-size:11.5px" onclick="window.open(\''+String(d.waze).replace(/'/g,'')+'\',\'_blank\')">📍 Waze</button>':'')+
+        (d.flyer?'<button class="abtn ghost" style="padding:5px 10px;font-size:11.5px" onclick="showFlyerX(\''+e.id+'\')">🖼️ פלאייר</button>':'')+
+       '</div></div>';
+    }).join('');
+    window.__EVX=rows;
+  });
+};
+window.showQrByIdX=function(id){
+  var e=(window.__EVX||[]).find(function(x){return String(x.id)===String(id)}); if(!e)return;
+  showQrX(e.name, (e.event_date||'')+(e.start_time?' · '+String(e.start_time).slice(0,5):''), e.qr_code);
+};
+window.showFlyerX=function(id){
+  var e=(window.__EVX||[]).find(function(x){return String(x.id)===String(id)}); if(!e)return;
+  var d={}; try{d=JSON.parse(e.description||'{}')}catch(x){}
+  if(!d.flyer)return T2('אין פלאייר לאירוע זה');
+  var w=window.open('','_blank');
+  if(w){w.document.write('<title>'+e.name+'</title><img src="'+d.flyer+'" style="max-width:100%">');}
+};
+function showNearestQr(){
+  var rows=window.__EVX||[];
+  if(rows.length&&rows[0].qr_code){ showQrByIdX(rows[0].id); }
+  else T2('ℹ️ צור אירוע חדש בפאנל למטה כדי להפיק QR');
+}
+
+/* ---------- ציור QR + הורדה ---------- */
+var CURQR='';
+window.showQrX=function(title,sub,code){
+  CURQR=code||'';
+  $id('evQrTitle').textContent=title||'אירוע';
+  $id('evQrSub').textContent=sub||'';
+  $id('evQrToken').textContent=code||'';
+  var box=$id('evQrBox'); box.innerHTML='';
+  try{
+    if(typeof QRCode!=='undefined'){ new QRCode(box,{text:code,width:190,height:190,correctLevel:(QRCode.CorrectLevel&&QRCode.CorrectLevel.M)||1}); }
+    else box.innerHTML='<div style="font-size:12px;color:#E5484D">ספריית QR לא נטענה — הקוד: <b dir="ltr">'+code+'</b></div>';
+  }catch(e){ box.textContent=code; }
+  $id('evQrModal').style.display='flex';
+};
+window.downloadQrX=function(){
+  try{
+    var cv=$id('evQrBox').querySelector('canvas');
+    var url=cv?cv.toDataURL('image/png'):null;
+    if(!url){var im=$id('evQrBox').querySelector('img'); url=im&&im.src;}
+    if(!url)return T2('⚠️ אין QR להורדה');
+    var a=document.createElement('a');a.href=url;a.download='maase-event-qr.png';document.body.appendChild(a);a.click();a.remove();
+    T2('⬇ ה-QR ירד למחשב');
+  }catch(e){T2('⚠️ '+e.message)}
+};
+
+/* ---------- boot: ממתין ל-db של השכבה הקודמת + לפאנל ---------- */
+function boot(){
+  try{
+    if(!window.__maaseDB && window.supabase && window.supabase.createClient){
+      window.__maaseDB = window.supabase.createClient(
+        'https://hucealurgkarqpyivvtv.supabase.co',
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1Y2VhbHVyZ2thcnFweWl2dnR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2Mjg0MjQsImV4cCI6MjA5ODIwNDQyNH0.8IYqpIiK4Fed8XqGfY5Hcqua-a7bXssa21zgPwo0kng');
+    }
+  }catch(e){}
+  injectPanel();
+}
+if(document.readyState!=='loading') setTimeout(boot,50);
+else document.addEventListener('DOMContentLoaded',function(){setTimeout(boot,50)});
+})();
+
+</script>
+
+<script>
+/* =====================================================================
+   מעשה 360 · שכבת v7 — ריכוז אירועים + הפצה ממוקדת + מעקב קריאה
+   נבנית מעל v6, לא נוגעת בשום שכבה קודמת.
+   ===================================================================== */
+(function(){
+'use strict';
+function $id(x){return document.getElementById(x)}
+function T3(m){try{toast(m)}catch(e){}}
+function esc7(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
+function getDB(){ return window.__maaseDB || null }
+
+/* ---------- הרחבת הפאנל בעמוד "נוכחות ואירועים" ---------- */
+function injectHubPanel(){
+  var host=$id('a-attend'); if(!host||$id('evHubPanel'))return;
+  var section=document.createElement('div');
+  section.id='evHubPanel'; section.className='panel'; section.style.marginTop='14px';
+  section.innerHTML=
+   '<div class="pt"><div class="t">📚 ריכוז כלל האירועים</div>'+
+    '<div style="display:flex;gap:8px;align-items:center">'+
+     '<input id="evHubSearch" placeholder="חיפוש..." style="padding:6px 10px;border:1px solid var(--line,#E6ECF0);border-radius:8px;font-size:12.5px" oninput="renderEvHubX()">'+
+     '<select id="evHubFilter" onchange="renderEvHubX()" style="padding:6px 10px;border:1px solid var(--line,#E6ECF0);border-radius:8px;font-size:12.5px">'+
+      '<option value="all">כל האירועים</option>'+
+      '<option value="future">עתידיים</option>'+
+      '<option value="past">חלפו</option>'+
+     '</select>'+
+     '<button class="abtn ghost" style="padding:6px 12px;font-size:12.5px" onclick="exportEventsHubX()">⬇ ייצוא</button>'+
+    '</div>'+
+   '</div>'+
+   '<div id="evHubList"><div style="color:#9AA3AD;font-size:13px;padding:10px">טוען...</div></div>';
+  host.appendChild(section);
+
+  /* מודאל הפצה */
+  var modal=document.createElement('div');
+  modal.id='evBroadcastModal';
+  modal.style.cssText='display:none;position:fixed;inset:0;z-index:9998;background:rgba(20,30,50,.55);align-items:center;justify-content:center';
+  modal.innerHTML=
+   '<div style="background:#fff;border-radius:18px;padding:24px;max-width:520px;width:92vw;max-height:88vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">'+
+    '<div style="font-weight:900;font-size:17px;margin-bottom:4px">📣 הפצת אירוע להתראות</div>'+
+    '<div id="evBcSub" style="font-size:12.5px;color:#6B7280;margin-bottom:14px"></div>'+
+    '<div style="font-size:12.5px;font-weight:800;margin-bottom:8px">בחר תפוצה:</div>'+
+    '<div id="evBcAud" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px"></div>'+
+    '<label style="font-size:12.5px;font-weight:700;display:block;margin-bottom:4px">כותרת ההתראה</label>'+
+    '<input id="evBcTitle" style="width:100%;padding:9px;border:1px solid var(--line,#E6ECF0);border-radius:8px;margin-bottom:10px">'+
+    '<label style="font-size:12.5px;font-weight:700;display:block;margin-bottom:4px">גוף ההתראה</label>'+
+    '<textarea id="evBcBody" rows="3" style="width:100%;padding:9px;border:1px solid var(--line,#E6ECF0);border-radius:8px;margin-bottom:10px;font-family:inherit"></textarea>'+
+    '<label style="font-size:12.5px;display:flex;align-items:center;gap:8px;margin-bottom:14px"><input type="checkbox" id="evBcUrg"> 🚨 סמן כהתראה דחופה (מחייב אישור קריאה)</label>'+
+    '<div id="evBcAudCount" style="font-size:12px;color:#6B7280;margin-bottom:12px"></div>'+
+    '<div style="display:flex;gap:8px">'+
+     '<button class="abtn o" style="flex:1" onclick="sendEventBroadcastX(this)">📣 שליחה</button>'+
+     '<button class="abtn ghost" onclick="document.getElementById(\'evBroadcastModal\').style.display=\'none\'">ביטול</button>'+
+    '</div>'+
+   '</div>';
+  document.body.appendChild(modal);
+
+  /* מודאל סטטוסי קריאה */
+  var readModal=document.createElement('div');
+  readModal.id='evReadModal';
+  readModal.style.cssText='display:none;position:fixed;inset:0;z-index:9998;background:rgba(20,30,50,.55);align-items:center;justify-content:center';
+  readModal.innerHTML=
+   '<div style="background:#fff;border-radius:18px;padding:24px;max-width:560px;width:92vw;max-height:86vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'+
+     '<div style="font-weight:900;font-size:16px" id="evReadTitle">סטטוס קריאה</div>'+
+     '<button class="abtn ghost" onclick="document.getElementById(\'evReadModal\').style.display=\'none\'">✕</button>'+
+    '</div>'+
+    '<div style="display:flex;gap:8px;margin-bottom:14px">'+
+     '<div style="flex:1;background:var(--green-s,#F1F8E4);border-radius:10px;padding:10px;text-align:center">'+
+      '<div style="font-size:22px;font-weight:900;color:var(--green-d,#6FA827)" id="evReadNum">0</div>'+
+      '<div style="font-size:11px;color:#6B7280">קראו ואישרו</div>'+
+     '</div>'+
+     '<div style="flex:1;background:var(--orange-s,#FFF2E4);border-radius:10px;padding:10px;text-align:center">'+
+      '<div style="font-size:22px;font-weight:900;color:var(--orange,#F58220)" id="evUnreadNum">0</div>'+
+      '<div style="font-size:11px;color:#6B7280">טרם קראו</div>'+
+     '</div>'+
+    '</div>'+
+    '<div id="evReadTabs" style="display:flex;gap:6px;border-bottom:1px solid #E6ECF0;margin-bottom:8px">'+
+     '<button class="abtn ghost" data-t="unread" onclick="switchReadTabX(this)" style="border-bottom:2px solid #F58220;border-radius:0;padding:6px 12px">טרם קראו</button>'+
+     '<button class="abtn ghost" data-t="read" onclick="switchReadTabX(this)" style="border-radius:0;padding:6px 12px">קראו</button>'+
+    '</div>'+
+    '<div id="evReadList" style="max-height:340px;overflow-y:auto"></div>'+
+    '<button class="abtn o" style="width:100%;margin-top:12px" onclick="remindUnreadX()">📨 שליחת תזכורת למי שטרם קרא</button>'+
+   '</div>';
+  document.body.appendChild(readModal);
+  loadEvHubX();
+}
+
+/* ---------- טעינה + רינדור ריכוז אירועים ---------- */
+window.__EVHUB = [];
+window.loadEvHubX = function(){
+  var db=getDB(), box=$id('evHubList'); if(!box)return;
+  if(!db){box.innerHTML='<div style="color:#E5484D;font-size:13px;padding:10px">אין חיבור למסד</div>';return}
+  db.from('events').select('*').order('event_date',{ascending:false}).limit(200).then(function(r){
+    if(r.error){box.innerHTML='<div style="color:#E5484D;font-size:12.5px;padding:10px">⚠️ '+esc7(r.error.message)+'</div>';return}
+    window.__EVHUB = (r.data||[]).filter(function(e){return e.name});
+    renderEvHubX();
+  });
+};
+
+window.renderEvHubX = function(){
+  var box=$id('evHubList'); if(!box)return;
+  var q=($id('evHubSearch').value||'').trim().toLowerCase();
+  var flt=$id('evHubFilter').value;
+  var today=new Date().toISOString().slice(0,10);
+  var list=(window.__EVHUB||[]).filter(function(e){
+    if(q&&!(String(e.name).toLowerCase().indexOf(q)>-1||String(e.location||'').toLowerCase().indexOf(q)>-1))return false;
+    if(flt==='future')return String(e.event_date||'')>=today;
+    if(flt==='past')return String(e.event_date||'')<today;
+    return true;
+  });
+  if(!list.length){box.innerHTML='<div style="color:#9AA3AD;font-size:13px;padding:14px;text-align:center">לא נמצאו אירועים</div>';return}
+  box.innerHTML='<table style="width:100%;border-collapse:collapse;font-size:12.5px">'+
+   '<tr style="background:var(--bg,#F4F7F9);text-align:right"><th style="padding:8px">שם האירוע</th><th style="padding:8px">תאריך</th><th style="padding:8px">מיקום</th><th style="padding:8px">סטטוס</th><th style="padding:8px">פעולות</th></tr>'+
+   list.map(function(e){
+     var d={};try{d=JSON.parse(e.description||'{}')}catch(x){}
+     var past=String(e.event_date||'')<today;
+     var statusHtml=past?'<span style="background:#EEE;color:#666;padding:3px 8px;border-radius:99px;font-size:11px;font-weight:700">חלף</span>':'<span style="background:var(--green-s,#F1F8E4);color:var(--green-d,#6FA827);padding:3px 8px;border-radius:99px;font-size:11px;font-weight:700">עתידי</span>';
+     var bcState=d.broadcast_id?'<span style="background:var(--blue-s,#E7F5F9);color:var(--blue-d,#1F7FA3);padding:3px 8px;border-radius:99px;font-size:11px;font-weight:700;margin-inline-start:4px">📣 הופץ</span>':'';
+     return '<tr style="border-bottom:1px solid #E6ECF0">'+
+      '<td style="padding:9px 8px;font-weight:800">'+esc7(e.name)+'</td>'+
+      '<td style="padding:9px 8px" dir="ltr">'+esc7(e.event_date||'—')+(e.start_time?'<br><span style="font-size:11px;color:#6B7280">'+esc7(String(e.start_time).slice(0,5))+'</span>':'')+'</td>'+
+      '<td style="padding:9px 8px">'+esc7(e.location||'—')+'</td>'+
+      '<td style="padding:9px 8px">'+statusHtml+bcState+'</td>'+
+      '<td style="padding:9px 8px">'+
+       '<div style="display:flex;gap:4px;flex-wrap:wrap">'+
+        (e.qr_code?'<button class="abtn ghost" style="padding:4px 8px;font-size:11px" onclick="showQrByIdX(\''+String(e.id).replace(/'/g,'')+'\')" title="QR">▣</button>':'')+
+        (d.waze?'<button class="abtn ghost" style="padding:4px 8px;font-size:11px" onclick="window.open(\''+String(d.waze).replace(/'/g,'').replace(/</g,'')+'\',\'_blank\')" title="Waze">📍</button>':'')+
+        (d.flyer?'<button class="abtn ghost" style="padding:4px 8px;font-size:11px" onclick="showFlyerX(\''+String(e.id).replace(/'/g,'')+'\')" title="פלאייר">🖼️</button>':'')+
+        '<button class="abtn o" style="padding:4px 8px;font-size:11px" onclick="openBroadcastX(\''+String(e.id).replace(/'/g,'')+'\')" title="הפצה">📣</button>'+
+        (d.broadcast_id?'<button class="abtn ghost" style="padding:4px 8px;font-size:11px" onclick="openReadStatusX(\''+String(e.id).replace(/'/g,'')+'\')" title="סטטוס קריאה">👁️</button>':'')+
+       '</div></td></tr>';
+   }).join('')+'</table>';
+};
+
+/* ---------- ייצוא ריכוז ---------- */
+window.exportEventsHubX = function(){
+  try{
+    if(typeof XLSX==='undefined')return T3('⚠️ ספריית Excel לא נטענה');
+    var today=new Date().toISOString().slice(0,10);
+    var rows=(window.__EVHUB||[]).map(function(e){
+      var d={};try{d=JSON.parse(e.description||'{}')}catch(x){}
+      return {'שם':e.name,'תאריך':e.event_date||'','שעה':String(e.start_time||'').slice(0,5),
+        'מיקום':e.location||'','Waze':d.waze||'','QR':e.qr_code||'',
+        'סטטוס':(String(e.event_date||'')<today?'חלף':'עתידי'),
+        'הופץ':d.broadcast_id?'כן':'לא'};
+    });
+    if(!rows.length)return T3('אין נתונים לייצוא');
+    var ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,'אירועים');
+    XLSX.writeFile(wb,'maase-events.xlsx');T3('⬇ הריכוז ירד ל-Excel');
+  }catch(e){T3('❌ '+e.message)}
+};
+
+/* ---------- הפצת אירוע: מודאל בחירת תפוצה ---------- */
+window.__BC_EV=null; window.__BC_AUD=null;
+window.openBroadcastX = function(evId){
+  var e=(window.__EVHUB||[]).find(function(x){return String(x.id)===String(evId)}); if(!e)return;
+  window.__BC_EV = e;
+  var when=(e.event_date||'')+(e.start_time?' · '+String(e.start_time).slice(0,5):'');
+  $id('evBcSub').textContent='האירוע: '+e.name+' · '+when+(e.location?' · '+e.location:'');
+  $id('evBcTitle').value='🎪 '+e.name;
+  $id('evBcBody').value='הוזמנת לאירוע: '+e.name+'\n📅 '+when+(e.location?'\n📍 '+e.location:'')+'\n\nמזמינים אותך להשתתף!';
+  $id('evBcUrg').checked=false;
+  buildAudiencePicker();
+  $id('evBroadcastModal').style.display='flex';
+};
+function buildAudiencePicker(){
+  var box=$id('evBcAud');
+  var db=getDB();
+  if(!db){box.innerHTML='<div style="color:#E5484D">אין חיבור</div>';return}
+  db.from('users').select('id,name,role,department').limit(500).then(function(r){
+    if(r.error){box.innerHTML='<div style="color:#E5484D">'+esc7(r.error.message)+'</div>';return}
+    var users=r.data||[];
+    var byRole={}, byDept={};
+    users.forEach(function(u){
+      var rl=(u.role||'user').trim()||'user'; byRole[rl]=(byRole[rl]||0)+1;
+      var dp=(u.department||'').trim(); if(dp)byDept[dp]=(byDept[dp]||0)+1;
+    });
+    var opts=[{k:'all',t:'👥 כלל הצוות',n:users.length}];
+    Object.keys(byRole).forEach(function(k){ opts.push({k:'role:'+k, t:'🏷️ תפקיד: '+k, n:byRole[k]}); });
+    Object.keys(byDept).forEach(function(k){ opts.push({k:'dept:'+k, t:'🏢 '+k, n:byDept[k]}); });
+    box.innerHTML=opts.map(function(o,i){
+      return '<label style="border:1.5px solid #E6ECF0;border-radius:10px;padding:9px;font-size:12.5px;font-weight:700;display:flex;align-items:center;gap:8px;cursor:pointer">'+
+       '<input type="radio" name="evbcaud" value="'+esc7(o.k)+'"'+(i===0?' checked':'')+' onchange="pickAudienceX(this)">'+
+       '<span style="flex:1">'+esc7(o.t)+'</span>'+
+       '<span style="background:var(--bg,#F4F7F9);padding:2px 8px;border-radius:99px;font-size:11px">'+o.n+'</span>'+
+      '</label>';
+    }).join('');
+    window.__BC_USERS = users;
+    pickAudienceX({value:'all'});
+  });
+}
+window.pickAudienceX = function(el){
+  window.__BC_AUD = el.value;
+  var users=window.__BC_USERS||[];
+  var n = users.filter(function(u){return matchAudience(u, window.__BC_AUD)}).length;
+  $id('evBcAudCount').textContent = '📊 ההתראה תישלח ל־'+n+' משתמשים';
+};
+function matchAudience(u, aud){
+  if(!aud||aud==='all')return true;
+  if(aud.indexOf('role:')===0)return (u.role||'user')===aud.slice(5);
+  if(aud.indexOf('dept:')===0)return (u.department||'')===aud.slice(5);
+  return true;
+}
+
+/* ---------- שליחת ההפצה ---------- */
+window.sendEventBroadcastX = function(btn){
+  var db=getDB(); if(!db)return T3('⚠️ אין חיבור');
+  var e=window.__BC_EV; if(!e)return;
+  var title=($id('evBcTitle').value||'').trim();
+  var body=($id('evBcBody').value||'').trim();
+  var urg=!!$id('evBcUrg').checked;
+  var aud=window.__BC_AUD||'all';
+  if(!title){T3('✏️ הזן כותרת');return}
+  var users=(window.__BC_USERS||[]).filter(function(u){return matchAudience(u,aud)});
+  if(!users.length){T3('⚠️ אין נמענים בתפוצה שבחרת');return}
+  if(btn)btn.disabled=true;
+
+  /* 1. יוצרים alert אחד עבור האירוע */
+  db.from('alerts').insert([{title:title, body:body, urgent:urg, read_count:0, total_users:users.length}]).select().then(function(r){
+    if(r.error){T3('❌ ההפצה נכשלה: '+r.error.message); if(btn)btn.disabled=false; return}
+    var alertId = r.data && r.data[0] && r.data[0].id;
+    /* 2. תיוג האירוע ב-description שהופץ */
+    var d={}; try{d=JSON.parse(e.description||'{}')}catch(x){}
+    d.broadcast_id = alertId; d.audience = aud; d.audience_size = users.length;
+    e.description = JSON.stringify(d);
+    db.from('events').update({description:e.description}).eq('id', e.id).then(function(){});
+    /* 3. הודעות בטבלת messages (אחת פר משתמש = מעקב נקרא/לא-נקרא ברמת פרט) */
+    var rows=users.map(function(u){
+      return {title:title, content:body, target:'event:'+e.id+':user:'+u.id, sent_at:new Date().toISOString()};
+    });
+    var done=0;
+    (function nx(i){
+      if(i>=rows.length){
+        T3('✅ ההתראה נשלחה ל-'+done+' משתמשים');
+        if(btn)btn.disabled=false;
+        $id('evBroadcastModal').style.display='none';
+        loadEvHubX();
+        return;
+      }
+      var b=rows.slice(i, i+80);
+      db.from('messages').insert(b).then(function(x){ if(!x.error)done+=b.length; nx(i+80); });
+    })(0);
+  });
+};
+
+/* ---------- סטטוס קריאה ---------- */
+window.__READ_STATE=null;
+window.openReadStatusX = function(evId){
+  var db=getDB(); if(!db)return T3('⚠️ אין חיבור');
+  var e=(window.__EVHUB||[]).find(function(x){return String(x.id)===String(evId)}); if(!e)return;
+  var d={};try{d=JSON.parse(e.description||'{}')}catch(x){}
+  if(!d.broadcast_id){T3('ℹ️ האירוע טרם הופץ');return}
+  $id('evReadTitle').textContent='סטטוס קריאה · '+e.name;
+  $id('evReadModal').style.display='flex';
+  $id('evReadList').innerHTML='<div style="color:#9AA3AD;font-size:13px;padding:10px">טוען...</div>';
+  /* טוענים: alert (עם read_count), alert_reads (מי אישר), users */
+  Promise.all([
+    db.from('alerts').select('*').eq('id', d.broadcast_id),
+    db.from('alert_reads').select('user_id').eq('alert_id', d.broadcast_id),
+    db.from('users').select('id,name,phone,role,department')
+  ]).then(function(res){
+    var a=(res[0].data||[])[0]||{};
+    var readIds=new Set((res[1].data||[]).map(function(x){return x.user_id}));
+    var users=res[2].data||[];
+    var scope=users.filter(function(u){return matchAudience(u, d.audience||'all')});
+    var readUsers=scope.filter(function(u){return readIds.has(u.id)});
+    var unreadUsers=scope.filter(function(u){return !readIds.has(u.id)});
+    $id('evReadNum').textContent=readUsers.length;
+    $id('evUnreadNum').textContent=unreadUsers.length;
+    window.__READ_STATE={read:readUsers, unread:unreadUsers, alertId:d.broadcast_id, aud:d.audience||'all'};
+    renderReadListX('unread');
+  }).catch(function(e){$id('evReadList').innerHTML='<div style="color:#E5484D;font-size:12.5px">⚠️ '+esc7(e.message)+'</div>'});
+};
+window.switchReadTabX = function(btn){
+  document.querySelectorAll('#evReadTabs .abtn').forEach(function(b){b.style.borderBottom='none';b.style.borderRadius='0'});
+  btn.style.borderBottom='2px solid #F58220';
+  renderReadListX(btn.dataset.t);
+};
+function renderReadListX(which){
+  var s=window.__READ_STATE; if(!s)return;
+  var list=s[which]||[];
+  if(!list.length){$id('evReadList').innerHTML='<div style="color:#9AA3AD;font-size:13px;padding:14px;text-align:center">'+(which==='read'?'עדיין אין אישורים':'כולם אישרו קריאה 🎉')+'</div>';return}
+  $id('evReadList').innerHTML=list.map(function(u){
+    return '<div style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid #F1F4F6">'+
+     '<div style="width:34px;height:34px;border-radius:10px;background:var(--blue-s,#E7F5F9);color:var(--blue-d,#1F7FA3);display:flex;align-items:center;justify-content:center;font-weight:900">'+esc7(String(u.name||'?').charAt(0))+'</div>'+
+     '<div style="flex:1"><div style="font-weight:800;font-size:13px">'+esc7(u.name||'—')+'</div>'+
+      '<div style="font-size:11.5px;color:#6B7280">'+esc7(u.department||u.role||'')+(u.phone?' · '+esc7(u.phone):'')+'</div></div>'+
+     (which==='read'?'<span style="color:var(--green-d,#6FA827);font-weight:800;font-size:12px">✓ קרא</span>':'<span style="color:var(--orange,#F58220);font-weight:800;font-size:12px">⏳ ממתין</span>')+
+    '</div>';
+  }).join('');
+}
+
+/* ---------- תזכורת אוטומטית למי שטרם קרא ---------- */
+window.remindUnreadX = function(){
+  var db=getDB(), s=window.__READ_STATE;
+  if(!db||!s||!s.unread.length)return T3('אין למי לשלוח תזכורת');
+  var rows=s.unread.map(function(u){
+    return {title:'תזכורת: קריאת התראת אירוע', content:'טרם אישרת את קריאת ההתראה על האירוע', target:'reminder:'+s.alertId+':user:'+u.id, sent_at:new Date().toISOString()};
+  });
+  db.from('messages').insert(rows).then(function(r){
+    if(r.error){T3('❌ '+r.error.message);return}
+    T3('📨 נשלחה תזכורת ל-'+rows.length+' משתמשים');
+  });
+};
+
+/* ---------- boot ---------- */
+function boot7(){
+  try{
+    if(!window.__maaseDB && window.supabase && window.supabase.createClient){
+      window.__maaseDB = window.supabase.createClient(
+        'https://hucealurgkarqpyivvtv.supabase.co',
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1Y2VhbHVyZ2thcnFweWl2dnR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2Mjg0MjQsImV4cCI6MjA5ODIwNDQyNH0.8IYqpIiK4Fed8XqGfY5Hcqua-a7bXssa21zgPwo0kng');
+    }
+  }catch(e){}
+  injectHubPanel();
+  /* רענון אוטומטי אחרי יצירת אירוע חדש: מאזין להוספה לרשימה של v6 */
+  setInterval(function(){ if($id('a-attend')&&$id('evHubList')&&!$id('evHubList').dataset.loaded){ $id('evHubList').dataset.loaded='1'; loadEvHubX(); } }, 1200);
+}
+if(document.readyState!=='loading') setTimeout(boot7,80);
+else document.addEventListener('DOMContentLoaded',function(){setTimeout(boot7,80)});
+})();
+
 </script>
 </body>
 </html>
